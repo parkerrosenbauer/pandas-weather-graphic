@@ -1,0 +1,119 @@
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.ticker import StrMethodFormatter
+import datetime
+import pandas as pd
+import numpy as np
+import warnings
+warnings.filterwarnings('ignore')
+
+df = pd.read_csv('data/C2A2_data/BinnedCsvs_d400/fb441e62df2d58994928907a91895ec62c2c42e6cd075c2700843b89.csv')
+df = df.drop('ID', axis=1)
+
+# sorting data by date
+df = df.sort_values(by="Date")
+df["Date"] = pd.to_datetime(df["Date"])
+
+# converting temperatures from thenths of degrees celcius to celcius
+df['Data_Value'] = df['Data_Value'] / 10
+
+# dropping Feb 29th as that won't be comparable to 2015 data
+df = df.loc[~(df['Date'].dt.month.eq(2) & df['Date'].dt.day.eq(29))] 
+
+# splitting dates into separate columns for easier analysis
+df['Year'] = df['Date'].dt.strftime('%Y')
+df['Month'] = df['Date'].dt.strftime('%m')
+df['Day'] = df['Date'].dt.strftime('%d')
+
+# separating df into two, one for 2015 data and one for 2005-2014 data
+weather_2015 = df[df['Date'].dt.year.isin([2015])]
+weather_05_14 = df.loc[~df["Date"].dt.year.isin([2015])]
+
+# resetting the year to a single year for the purpose of keeping month and date in chronological order when plotting
+weather_05_14['Year'] = 2008
+weather_05_14['Date'] = pd.to_datetime(weather_05_14[['Year', 'Month', 'Day']])
+
+# extracting the min and max temperatures for each day, regardless of year
+max_temps = weather_05_14.loc[weather_05_14.groupby(['Day', 'Month'], sort=False)
+                              ['Data_Value'].idxmax()][['Data_Value', 'Year', 'Month', 'Day', 'Date']]
+max_temps.rename(columns={'Data_Value': 'Max'}, inplace=True)
+
+min_temps = weather_05_14.loc[weather_05_14.groupby(['Day', 'Month'], sort=False)
+                              ['Data_Value'].idxmin()][['Data_Value', 'Year', 'Month', 'Day', 'Date']]
+min_temps.rename(columns={'Data_Value': 'Min'}, inplace=True)
+
+all_temps = max_temps.merge(min_temps, left_on='Date', right_on='Date')
+all_temps.drop(['Year_x', 'Month_x', 'Day_x', 'Year_y', 'Month_y', 'Day_y'], axis=1, inplace=True)
+all_temps.set_index('Date', inplace=True)
+
+# create a sub df of max temperatures for 2015
+max_2015 = weather_2015.loc[weather_2015.groupby(['Day', 'Month'], sort=False)
+                            ['Data_Value'].idxmax()][['Data_Value', 'Year', 'Month', 'Day', 'Date']]
+max_2015.rename(columns={'Data_Value': 'Max 2015'}, inplace=True)
+
+# merge max_2015 and max_temps for comparison
+max_2015 = max_2015.merge(max_temps, how='inner', left_on=['Day', 'Month'], 
+                          right_on=['Day', 'Month']).drop(['Year_y', 'Date_y'], axis=1)
+max_2015.rename(columns={'Year_x': 'Year', 'Date_x': 'Date'}, inplace=True)
+
+# create a column that's value is true if the 2015 max is higher than the max_temps max, dropping any false values
+max_2015['Bool'] = max_2015['Max 2015'] > max_2015['Max']
+max_2015 = max_2015[max_2015['Bool'] == True]
+
+# create a sub df of min temperatures for 2015
+min_2015 = weather_2015.loc[weather_2015.groupby(['Day', 'Month'], sort=False)
+                            ['Data_Value'].idxmin()][['Data_Value', 'Year', 'Month', 'Day', 'Date']]
+min_2015.rename(columns={'Data_Value': 'Min 2015'}, inplace=True)
+
+# merge min_2015 and min_temps for comparison
+min_2015 = min_2015.merge(min_temps, how='inner', left_on=['Day', 'Month'], 
+                          right_on=['Day', 'Month']).drop(['Year_y', 'Date_y'], axis=1)
+min_2015.rename(columns={'Year_x': 'Year', 'Date_x': 'Date'}, inplace=True)
+
+# create a column that's value is true if the 2015 min is lower than the min_temps min, dropping any false values
+min_2015['Bool'] = min_2015['Min 2015'] < min_2015['Min']
+min_2015 = min_2015[min_2015['Bool'] == True]
+
+# resetting the year in the 2015 dfs to match the others for purposes of chronological plotting
+max_2015['Year'] = 2008
+max_2015['Date'] = pd.to_datetime(max_2015[['Year', 'Month', 'Day']])
+max_2015.set_index('Date', inplace=True)
+min_2015['Year'] = 2008
+min_2015['Date'] = pd.to_datetime(min_2015[['Year', 'Month', 'Day']])
+min_2015.set_index('Date', inplace=True)
+
+# plotting min and max
+fix, ax = plt.subplots()
+
+ax.plot(all_temps.index, all_temps['Max'], color='#454545', label='_nolegend_')
+ax.plot(all_temps.index, all_temps['Min'], color='#454545', label="05-14 Record breaking temperatures")
+
+# label graph
+plt.suptitle("Daily Record Breaking Temperatures in 2015 as Compared to 2005-2014", fontsize=20, color="#454545")
+plt.title("Ann Arbor, Michigan, United States", color="#454545")
+
+# reformatting x axis
+ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+ax.set_xlim(datetime.date(2008, 1, 1), datetime.date(2008, 12, 31))
+
+# filling between lines
+ax.fill_between(all_temps.index, all_temps['Max'], all_temps['Min'], facecolor='lightgray')
+
+# plotting 2015 data
+ax.scatter(max_2015.index, max_2015['Max 2015'], color='red', label='2015 Record breaking temperatures')
+ax.scatter(min_2015.index, min_2015['Min 2015'], color='red', label='_nolegend_')
+
+# reformatting
+ax.spines['top'].set_visible(False)
+ax.spines['bottom'].set_visible(False)
+ax.spines['right'].set_visible(False)
+ax.xaxis.set_ticks_position('none')
+
+ax.yaxis.set_major_formatter(StrMethodFormatter(u"{x:.0f} °C"))
+
+# resizing graph
+plt.gcf().set_size_inches(13, 7)
+
+# legend
+ax.legend(facecolor="lightgray", loc="lower right")
